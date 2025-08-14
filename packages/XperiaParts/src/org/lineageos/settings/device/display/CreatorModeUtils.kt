@@ -5,11 +5,13 @@
 
 package org.lineageos.settings.device.display
 
+import android.app.Activity
 import android.content.Context
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.hardware.display.ColorDisplayManager
 import android.provider.Settings
 import android.util.Log
-import lineageos.hardware.LiveDisplayManager
 import vendor.semc.hardware.display.V2_0.IDisplay
 import vendor.semc.hardware.display.V2_0.IDisplayCallback
 import vendor.semc.hardware.display.V2_0.PccMatrix
@@ -22,12 +24,15 @@ class CreatorModeUtils(private val context: Context) : IDisplayCallback.Stub() {
         val service = IDisplay.getService() ?: throw Exception("SEMC Display HIDL not found")
 
         // Register itself as callback for HIDL
-        service.registerCallback(this)
+        if (!isEnabled) {
+            service.set_sspp_color_mode(1)
+            colorDisplayManager.setColorMode(3)
+            service.set_color_mode(1)
+        }
 
         service.setup()
         service
     }
-    private val liveDisplayManager: LiveDisplayManager = LiveDisplayManager.getInstance(context)
 
     val isEnabled: Boolean
         get() = Settings.Secure.getInt(context.contentResolver, CREATOR_MODE_ENABLE, 0) != 0
@@ -50,9 +55,39 @@ class CreatorModeUtils(private val context: Context) : IDisplayCallback.Stub() {
     }
 
     override fun onWhiteBalanceMatrixChanged(matrix: PccMatrix) {
-        val colorMatrix: FloatArray = floatArrayOf(matrix.red, matrix.green, matrix.blue)
+        val colorMatrix: ColorMatrix =
+            ColorMatrix().apply {
+                set(
+                    floatArrayOf(
+                        matrix.red,
+                        matrix.green,
+                        matrix.blue,
+                        0f,
+                        0f,
+                        matrix.red,
+                        matrix.green,
+                        matrix.blue,
+                        0f,
+                        0f,
+                        matrix.red,
+                        matrix.green,
+                        matrix.blue,
+                        0f,
+                        0f,
+                        0f,
+                        0f,
+                        0f,
+                        1f,
+                        0f,
+                    )
+                )
+            }
+
+        val filter = ColorMatrixColorFilter(colorMatrix)
+
+        val views = (context as? Activity)?.window?.decorView ?: return
+        views.post { views.background.colorFilter = filter }
         Log.i(TAG, "New white balance: ${matrix.red}, ${matrix.green}, ${matrix.blue}")
-        liveDisplayManager.setColorAdjustment(colorMatrix)
     }
 
     companion object {
